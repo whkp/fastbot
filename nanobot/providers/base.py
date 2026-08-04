@@ -245,10 +245,15 @@ class ProviderCallContext:
     The regular ``chat`` contract stays provider-agnostic. Responses-capable
     providers consume this context through the opt-in ``chat_with_context``
     hooks, while every other provider inherits the context-free delegation.
+
+    ``ephemeral_context`` carries model-only overlay text (e.g. TASK_STATE) that
+    is sent with this single request and never persisted into the transcript,
+    session history, checkpoints, or provider conversation state.
     """
 
     conversation_state: ProviderConversationState | None = field(default=None, repr=False)
     context_window_tokens: int | None = None
+    ephemeral_context: str | None = None
 
 
 @dataclass
@@ -822,8 +827,13 @@ class LLMProvider(ABC):
         provider_context: ProviderCallContext,
         **kwargs: Any,
     ) -> LLMResponse:
-        """Opt-in continuation hook; ordinary providers delegate to ``chat``."""
-        _ = provider_context
+        """Opt-in continuation hook; ordinary providers delegate to ``chat``.
+
+        ``provider_context.ephemeral_context`` (model-only overlay) is merged
+        into the request copy and dropped when the request completes. Overrides
+        must reproduce this merge to honor ephemeral context.
+        """
+        kwargs = self._apply_ephemeral_context(kwargs, provider_context)
         return await self.chat(**kwargs)
 
     async def chat_stream_with_context(
@@ -833,8 +843,30 @@ class LLMProvider(ABC):
         **kwargs: Any,
     ) -> LLMResponse:
         """Streaming continuation hook with a context-free default."""
-        _ = provider_context
+        kwargs = self._apply_ephemeral_context(kwargs, provider_context)
         return await self.chat_stream(**kwargs)
+
+    def _apply_ephemeral_context(
+        self,
+        kwargs: dict[str, Any],
+        provider_context: ProviderCallContext | None,
+    ) -> dict[str, Any]:
+        """Return a copy of *kwargs* whose ``messages`` carry the ephemeral
+        overlay. The original dict and message list are not mutated."""
+        overlay = (
+            provider_context.ephemeral_context
+            if provider_context is not None
+            else None
+        )
+        if not overlay:
+            return kwargs
+        messages = kwargs.get("messages")
+        if not isinstance(messages, list):
+            return kwargs
+        from nanobot.agent.model_context import merge_overlay_into_messages
+
+        merged = merge_overlay_into_messages(messages, overlay)
+        return {**kwargs, "messages": merged}
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
         """Call chat_stream() and convert unexpected exceptions to error responses."""

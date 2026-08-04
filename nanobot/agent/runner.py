@@ -18,6 +18,7 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
+from nanobot.agent.model_context import ModelContextOverlay
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import (
     LLMProvider,
@@ -115,6 +116,10 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
+    # Model-only context overlay provider. Called before every provider request
+    # to build the ephemeral TASK_STATE/nudge/stall block; the rendered text is
+    # sent with that single request and never persisted.
+    overlay_provider: Callable[[], ModelContextOverlay | None] | None = None
 
 
 @dataclass(slots=True)
@@ -872,6 +877,34 @@ class AgentRunner:
             provider_state=conversation_state.finish(messages),
         )
 
+    @staticmethod
+    def _overlay_text(spec: AgentRunSpec) -> str | None:
+        """Render the current model-only overlay text, or None."""
+        provider = spec.overlay_provider
+        if provider is None:
+            return None
+        overlay = provider()
+        if overlay is None or overlay.is_empty:
+            return None
+        return overlay.render()
+
+    @staticmethod
+    def _with_ephemeral_context(
+        provider_context: ProviderCallContext | None,
+        overlay_text: str | None,
+    ) -> ProviderCallContext | None:
+        """Return a provider context carrying *overlay_text* as ephemeral
+        context. The original context is left untouched."""
+        if not overlay_text:
+            return provider_context
+        if provider_context is None:
+            return ProviderCallContext(ephemeral_context=overlay_text)
+        return ProviderCallContext(
+            conversation_state=provider_context.conversation_state,
+            context_window_tokens=provider_context.context_window_tokens,
+            ephemeral_context=overlay_text,
+        )
+
     def _build_request_kwargs(
         self,
         spec: AgentRunSpec,
@@ -916,6 +949,10 @@ class AgentRunner:
         if timeout_s <= 0:
             timeout_s = None
 
+        provider_context = self._with_ephemeral_context(
+            provider_context,
+            self._overlay_text(spec),
+        )
         kwargs = self._build_request_kwargs(
             spec,
             messages,
@@ -1247,6 +1284,10 @@ class AgentRunner:
         *,
         provider_context: ProviderCallContext | None = None,
     ) -> LLMResponse:
+        provider_context = self._with_ephemeral_context(
+            provider_context,
+            self._overlay_text(spec),
+        )
         kwargs = self._build_request_kwargs(
             spec,
             messages,
