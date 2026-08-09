@@ -49,6 +49,15 @@
       "noMatch": "没有待处理请求与此配对码匹配。"
     }
   },
+  "temporaryChat": {
+    "title": "临时聊天",
+    "retention": "不会保存到历史记录或记忆。",
+    "expiration": "刷新、关闭页面或连接中断后，临时聊天会结束。",
+    "externalEffects": "请求仍会发送给模型提供商，工具操作也可能留下更改。",
+    "clear": "清空临时聊天",
+    "sectionTitle": "临时聊天",
+    "closeAction": "关闭临时聊天：{{title}}"
+  },
   "sidebar": {
     "navigation": "侧边栏导航",
     "collapse": "收起侧边栏",
@@ -514,7 +523,15 @@
       "profile": "配置档案",
       "extraHeaders": "额外请求头",
       "extraBody": "额外请求体",
-      "extraQuery": "额外查询参数"
+      "extraQuery": "额外查询参数",
+      "capabilityFastMode": "Fast 模式",
+      "capabilityFastModeHelp": "通过 OpenAI 优先服务层获取更快响应，会更快消耗额度。",
+      "capabilityDeepSeekSearch": "DeepSeek 联网搜索",
+      "capabilityDeepSeekSearchHelp": "允许 DeepSeek V4 Flash 通过 Responses API 搜索网络，并在对话中展示搜索过程。",
+      "capabilityXSearch": "X 搜索",
+      "capabilityXSearchHelp": "允许受支持的 Grok 模型使用 xAI 托管的 X Search，并在对话中展示搜索过程。",
+      "capabilityOpenAISearch": "OpenAI 联网搜索",
+      "capabilityOpenAISearchHelp": "允许兼容 Responses API 的模型搜索网络，并在对话中展示搜索过程。"
     },
     "legal": {
       "thirdPartyBrands": "产品名称、Logo 和品牌归各自所有者所有；此处仅用于识别，不代表背书或合作。"

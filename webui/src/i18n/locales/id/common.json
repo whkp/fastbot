@@ -49,6 +49,15 @@
       "noMatch": "Tidak ada permintaan tertunda yang cocok dengan kode ini."
     }
   },
+  "temporaryChat": {
+    "title": "Obrolan sementara",
+    "retention": "Tidak disimpan ke riwayat atau memori.",
+    "expiration": "Memuat ulang, menutup, atau kehilangan koneksi akan mengakhiri obrolan ini.",
+    "externalEffects": "Permintaan tetap dikirim ke penyedia model dan tindakan alat dapat meninggalkan perubahan.",
+    "clear": "Hapus obrolan sementara",
+    "sectionTitle": "Obrolan sementara",
+    "closeAction": "Tutup obrolan sementara: {{title}}"
+  },
   "sidebar": {
     "navigation": "Navigasi bilah samping",
     "collapse": "Ciutkan sidebar",
@@ -365,7 +374,15 @@
       "profile": "Profil",
       "extraHeaders": "Header tambahan",
       "extraBody": "Body tambahan",
-      "extraQuery": "Parameter kueri tambahan"
+      "extraQuery": "Parameter kueri tambahan",
+      "capabilityFastMode": "Mode cepat",
+      "capabilityFastModeHelp": "Gunakan tingkat layanan prioritas OpenAI agar respons lebih cepat. Kredit akan terpakai lebih cepat.",
+      "capabilityDeepSeekSearch": "Pencarian web DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Izinkan DeepSeek V4 Flash mencari di web melalui Responses API. Aktivitas pencarian ditampilkan di chat.",
+      "capabilityXSearch": "Pencarian X",
+      "capabilityXSearchHelp": "Izinkan model Grok yang didukung menggunakan X Search yang dihosting xAI. Aktivitas pencarian ditampilkan di chat.",
+      "capabilityOpenAISearch": "Pencarian web OpenAI",
+      "capabilityOpenAISearchHelp": "Izinkan model yang kompatibel dengan Responses API mencari di web. Aktivitas pencarian ditampilkan di chat."
     },
     "image": {
       "selectProvider": "Pilih penyedia",

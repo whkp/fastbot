@@ -49,6 +49,15 @@
       "noMatch": "Aucune demande en attente ne correspond à ce code."
     }
   },
+  "temporaryChat": {
+    "title": "Discussion temporaire",
+    "retention": "Elle n’est enregistrée ni dans l’historique ni dans la mémoire.",
+    "expiration": "Recharger, fermer ou perdre la connexion met fin à ces discussions.",
+    "externalEffects": "Les requêtes sont tout de même envoyées au fournisseur du modèle et les outils peuvent laisser des modifications.",
+    "clear": "Effacer la discussion temporaire",
+    "sectionTitle": "Discussions temporaires",
+    "closeAction": "Fermer la discussion temporaire : {{title}}"
+  },
   "sidebar": {
     "navigation": "Navigation de la barre latérale",
     "collapse": "Réduire la barre latérale",
@@ -365,7 +374,15 @@
       "profile": "Profil",
       "extraHeaders": "En-têtes supplémentaires",
       "extraBody": "Corps supplémentaire",
-      "extraQuery": "Paramètres de requête supplémentaires"
+      "extraQuery": "Paramètres de requête supplémentaires",
+      "capabilityFastMode": "Mode rapide",
+      "capabilityFastModeHelp": "Utilise le niveau de service prioritaire d’OpenAI pour accélérer les réponses. Les crédits sont consommés plus rapidement.",
+      "capabilityDeepSeekSearch": "Recherche web DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Permet à DeepSeek V4 Flash de rechercher sur le web via l’API Responses. L’activité de recherche apparaît dans le chat.",
+      "capabilityXSearch": "Recherche sur X",
+      "capabilityXSearchHelp": "Permet aux modèles Grok compatibles d’utiliser X Search hébergé par xAI. L’activité de recherche apparaît dans le chat.",
+      "capabilityOpenAISearch": "Recherche web OpenAI",
+      "capabilityOpenAISearchHelp": "Permet aux modèles compatibles avec l’API Responses de rechercher sur le web. L’activité de recherche apparaît dans le chat."
     },
     "image": {
       "selectProvider": "Choisir un fournisseur",

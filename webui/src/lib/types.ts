@@ -367,7 +367,7 @@ export interface WorkspacesPayload {
 }
 
 export type SidebarDensity = "comfortable" | "compact";
-export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc";
+export type SidebarSortMode = "updated_desc" | "created_desc" | "title_asc" | "manual";
 
 export interface SidebarViewState {
   density: SidebarDensity;
@@ -381,6 +381,7 @@ export interface SidebarStatePayload {
   schema_version: number;
   pinned_keys: string[];
   archived_keys: string[];
+  session_order: string[];
   title_overrides: Record<string, string>;
   project_name_overrides: Record<string, string>;
   tags_by_key: Record<string, string[]>;
@@ -1161,7 +1162,7 @@ export interface InboundTurnMetadata {
 
 export type InboundEvent =
   | { event: "ready"; chat_id: string; client_id: string }
-  | { event: "attached"; chat_id: string }
+  | { event: "attached"; chat_id: string; temporary?: boolean }
   | { event: "message_accepted"; chat_id: string; turn_id: string }
   | ({
       event: "message";
@@ -1337,8 +1338,11 @@ export interface FilePreviewPayload {
 
 export type Outbound =
   | { type: "new_chat"; workspace_scope?: WorkspaceScopePayload }
+  | { type: "new_temporary_chat" }
   | { type: "fork_chat"; source_chat_id: string; before_user_index: number; title?: string }
   | { type: "attach"; chat_id: string }
+  | { type: "set_sidebar_state"; state: SidebarStatePayload }
+  | { type: "discard_temporary_chat"; chat_id: string }
   | { type: "set_workspace_scope"; chat_id: string; workspace_scope: WorkspaceScopePayload }
   | { type: "transcribe_audio"; request_id: string; data_url: string; duration_ms?: number }
   | {

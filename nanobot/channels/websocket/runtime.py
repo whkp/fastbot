@@ -21,7 +21,6 @@ from websockets.exceptions import ConnectionClosed
 from websockets.http11 import Request as WsRequest
 
 from nanobot.bus.events import (
-    INBOUND_META_SESSION_READ_SCOPE,
     OUTBOUND_META_AGENT_UI,
     OutboundMessage,
 )
@@ -34,7 +33,6 @@ from nanobot.bus.outbound_events import (
     TurnEndEvent,
     TurnModelUpdatedEvent,
     outbound_event_from_message,
-    outbound_message_for_event,
 )
 from nanobot.bus.queue import MessageBus
 from nanobot.channels.base import BaseChannel
@@ -53,6 +51,7 @@ from nanobot.security.workspace_access import (
 from nanobot.session.goal_state import goal_state_ws_blob
 from nanobot.session.webui_turns import (
     clear_websocket_turn_if_current,
+    clear_websocket_turns,
     mark_websocket_turn_transcript_persistence_failed,
     register_queued_websocket_turn_if_idle,
     websocket_turn_id,
@@ -81,11 +80,12 @@ from nanobot.webui.metadata import (
     WEBUI_TURN_METADATA_KEY,
 )
 from nanobot.webui.session_access import (
-    SessionAccessScope,
     SessionMention,
     WebuiSessionAccess,
     session_mentions_runtime_context,
 )
+from nanobot.webui.sidebar_state import write_webui_sidebar_state
+from nanobot.webui.temporary_chats import TemporaryChatError
 from nanobot.webui.transcript import WEBUI_TRANSCRIPT_INCOMPLETE_KEY
 from nanobot.webui.transcription_ws import webui_transcription_event
 from nanobot.webui.websocket_logging import websockets_server_logger
@@ -284,21 +284,6 @@ class WebSocketConfig(Base):
         )
 
 
-def publish_runtime_model_update(
-    bus: MessageBus,
-    model: str,
-    model_preset: str | None,
-) -> None:
-    """Enqueue a runtime model snapshot for websocket subscribers (fan-out in-channel)."""
-    bus.outbound.put_nowait(
-        outbound_message_for_event(
-            channel="websocket",
-            chat_id="*",
-            event=RuntimeModelUpdatedEvent(model=model, model_preset=model_preset),
-        )
-    )
-
-
 def _parse_inbound_payload(raw: str) -> str | None:
     """Parse a client frame into text; return None for empty or unrecognized content."""
     text = raw.strip()
@@ -398,6 +383,7 @@ class WebSocketChannel(BaseChannel):
         self._ingress = gateway.ingress
         self._transcripts = gateway.transcripts
         self._workspaces = gateway.workspaces
+        self._temporary_chats = gateway.temporary_chats
         self._session_access = (
             WebuiSessionAccess(gateway.session_manager)
             if gateway.session_manager is not None
@@ -415,6 +401,33 @@ class WebSocketChannel(BaseChannel):
         """Idempotently subscribe *connection* to *chat_id*."""
         self._subs.setdefault(chat_id, set()).add(connection)
         self._conn_chats.setdefault(connection, set()).add(chat_id)
+
+    def _detach(self, connection: ServerConnection, chat_id: str) -> None:
+        chats = self._conn_chats.get(connection)
+        if chats is not None:
+            chats.discard(chat_id)
+            if not chats:
+                self._conn_chats.pop(connection, None)
+        subscribers = self._subs.get(chat_id)
+        if subscribers is not None:
+            subscribers.discard(connection)
+            if not subscribers:
+                self._subs.pop(chat_id, None)
+
+    def _clear_stream_buffers(self, chat_id: str) -> None:
+        for key in tuple(self._stream_text_buffers):
+            if key[0] == chat_id:
+                self._stream_text_buffers.pop(key, None)
+
+    async def _discard_connection_owned_chat(
+        self,
+        connection: ServerConnection,
+        chat_id: str,
+    ) -> None:
+        await self._temporary_chats.discard(connection, chat_id)
+        self._detach(connection, chat_id)
+        clear_websocket_turns(chat_id)
+        self._clear_stream_buffers(chat_id)
 
     async def send_webui_protocol_error(
         self,
@@ -444,16 +457,16 @@ class WebSocketChannel(BaseChannel):
         )
         await self._hydrate_after_subscribe(fork_id)
 
-    def _cleanup_connection(self, connection: ServerConnection) -> None:
+    async def _cleanup_connection(self, connection: ServerConnection) -> None:
         """Remove *connection* from every subscription set; safe to call multiple times."""
-        chat_ids = self._conn_chats.pop(connection, set())
+        chat_ids = tuple(self._conn_chats.get(connection, ()))
         for cid in chat_ids:
-            subs = self._subs.get(cid)
-            if subs is None:
-                continue
-            subs.discard(connection)
-            if not subs:
-                self._subs.pop(cid, None)
+            if self._temporary_chats.owns(connection, cid):
+                await self._discard_connection_owned_chat(connection, cid)
+            else:
+                self._detach(connection, cid)
+        for cid in self._temporary_chats.chat_ids_for_owner(connection):
+            await self._discard_connection_owned_chat(connection, cid)
         self._conn_default.pop(connection, None)
         self._webui_connections.discard(connection)
 
@@ -506,7 +519,7 @@ class WebSocketChannel(BaseChannel):
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
         except Exception as e:
             self.logger.warning("failed to send {} event: {}", event, e)
 
@@ -733,7 +746,7 @@ class WebSocketChannel(BaseChannel):
         except Exception as e:
             self.logger.debug("connection ended: {}", e)
         finally:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
 
     # -- Inbound WebSocket envelopes ---------------------------------------
 
@@ -768,22 +781,83 @@ class WebSocketChannel(BaseChannel):
             )
             await self._hydrate_after_subscribe(new_id)
             return
+        if t == "new_temporary_chat":
+            try:
+                new_id = self._temporary_chats.create(
+                    connection,
+                    trusted_webui=connection in self._webui_connections,
+                )
+            except TemporaryChatError as exc:
+                await self._send_event(connection, "error", detail=exc.detail)
+                return
+            self._attach(connection, new_id)
+            await self._send_event(
+                connection,
+                "attached",
+                chat_id=new_id,
+                temporary=True,
+            )
+            return
         if t == "fork_chat":
             await handle_webui_fork_chat(self, connection, envelope)
+            return
+        if t == "discard_temporary_chat":
+            cid = envelope.get("chat_id")
+            if not _is_valid_chat_id(cid):
+                await self._send_event(connection, "error", detail="invalid temporary chat_id")
+                return
+            try:
+                await self._discard_connection_owned_chat(connection, cid)
+            except TemporaryChatError as exc:
+                await self._send_event(connection, "error", detail=exc.detail, chat_id=cid)
             return
         if t == "attach":
             cid = envelope.get("chat_id")
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
                 return
+            try:
+                self._temporary_chats.validate_attach(cid)
+            except TemporaryChatError as exc:
+                await self._send_event(connection, "error", detail=exc.detail, chat_id=cid)
+                return
             self._attach(connection, cid)
             await self._send_event(connection, "attached", chat_id=cid)
             await self._hydrate_after_subscribe(cid)
+            return
+        if t == "set_sidebar_state":
+            if connection not in self._webui_connections:
+                await self._send_event(connection, "error", detail="access_denied")
+                return
+            state = envelope.get("state")
+            if not isinstance(state, dict):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="invalid_sidebar_state",
+                )
+                return
+            try:
+                await asyncio.to_thread(
+                    write_webui_sidebar_state,
+                    cast(dict[str, Any], state),
+                )
+            except (OSError, ValueError):
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail="invalid_sidebar_state",
+                )
             return
         if t == "set_workspace_scope":
             cid = envelope.get("chat_id")
             if not _is_valid_chat_id(cid):
                 await self._send_event(connection, "error", detail="invalid chat_id")
+                return
+            try:
+                self._temporary_chats.validate_workspace_update(cid)
+            except TemporaryChatError as exc:
+                await self._send_event(connection, "error", detail=exc.detail, chat_id=cid)
                 return
             scope = await self._workspace_scope_or_error(
                 connection,
@@ -853,6 +927,21 @@ class WebSocketChannel(BaseChannel):
                 )
                 return
 
+            try:
+                temporary_policy = self._temporary_chats.message_policy(
+                    connection,
+                    cid,
+                    content,
+                )
+            except TemporaryChatError as exc:
+                await self._send_event(
+                    connection,
+                    "error",
+                    detail=exc.detail,
+                    **rejection_fields,
+                )
+                return
+
             raw_media = envelope.get("media")
             media_paths: list[str] = []
             if raw_media is not None:
@@ -875,6 +964,8 @@ class WebSocketChannel(BaseChannel):
                         **rejection_fields,
                     )
                     return
+                if temporary_policy is not None:
+                    self._temporary_chats.register_media(connection, cid, media_paths)
 
             # Allow media-only turns (content may be empty when attachments are present).
             if not content.strip() and not media_paths:
@@ -887,16 +978,21 @@ class WebSocketChannel(BaseChannel):
                 return
             # Auto-attach on first use so clients can one-shot without a separate attach.
             self._attach(connection, cid)
-            await self._hydrate_after_subscribe(cid)
+            if temporary_policy is None or temporary_policy.hydrate_transcript:
+                await self._hydrate_after_subscribe(cid)
 
             # Resolve after hydration so a concurrent downgrade cannot be overwritten.
             scope = await self._workspace_scope_or_error(
                 connection,
-                lambda: self._workspaces.scope_for_message(
-                    envelope,
-                    chat_id=cid,
-                    chat_running=websocket_turn_wall_started_at(cid) is not None,
-                    controls_available=self._workspace_controls_available(connection),
+                lambda: (
+                    temporary_policy.workspace_scope
+                    if temporary_policy is not None
+                    else self._workspaces.scope_for_message(
+                        envelope,
+                        chat_id=cid,
+                        chat_running=websocket_turn_wall_started_at(cid) is not None,
+                        controls_available=self._workspace_controls_available(connection),
+                    )
                 ),
                 chat_id=cid,
                 turn_id=turn_id,
@@ -921,8 +1017,6 @@ class WebSocketChannel(BaseChannel):
                 metadata["webui"] = True
                 metadata.update(self._transcripts.client_turn_metadata(envelope.get("turn_id")))
             trusted_webui = metadata.get("webui") is True and connection in self._webui_connections
-            if trusted_webui:
-                metadata[INBOUND_META_SESSION_READ_SCOPE] = f"{self.name}:"
             cli_apps = normalize_cli_app_mentions(envelope.get("cli_apps"))
             if cli_apps:
                 metadata["cli_apps"] = cli_apps
@@ -937,12 +1031,7 @@ class WebSocketChannel(BaseChannel):
                 session_mentions = await asyncio.to_thread(
                     self._session_access.normalize_mentions,
                     envelope.get("session_mentions"),
-                    SessionAccessScope(
-                        current_session_key=f"{self.name}:{cid}",
-                        session_key_prefix=f"{self.name}:",
-                        project_path=scope.project_path,
-                        restrict_to_workspace=scope.restrict_to_workspace,
-                    ),
+                    exclude_session_key=f"{self.name}:{cid}",
                 )
                 if session_mentions:
                     metadata["session_mentions"] = session_mentions
@@ -956,7 +1045,13 @@ class WebSocketChannel(BaseChannel):
                     metadata[WEBSOCKET_TURN_OWNER_METADATA_KEY] = queued_owner
             accepted = False
             try:
-                if is_webui:
+                if (
+                    is_webui
+                    and (
+                        temporary_policy is None
+                        or temporary_policy.persist_transcript
+                    )
+                ):
                     self._transcripts.append_user_message(
                         cid,
                         content,
@@ -985,6 +1080,16 @@ class WebSocketChannel(BaseChannel):
                     media=media_paths or None,
                     metadata=metadata,
                     is_dm=False,
+                    session_key=(
+                        temporary_policy.session_key
+                        if temporary_policy is not None
+                        else None
+                    ),
+                    require_existing_session=(
+                        temporary_policy.require_existing_session
+                        if temporary_policy is not None
+                        else False
+                    ),
                 )
                 accepted = True
             finally:
@@ -1045,6 +1150,7 @@ class WebSocketChannel(BaseChannel):
         self._conn_default.clear()
         self._webui_connections.clear()
         self._tokens.clear()
+        self._temporary_chats.close()
 
     async def _safe_send_to(
         self,
@@ -1057,7 +1163,7 @@ class WebSocketChannel(BaseChannel):
         try:
             await connection.send(raw)
         except ConnectionClosed:
-            self._cleanup_connection(connection)
+            await self._cleanup_connection(connection)
             self.logger.warning("connection gone{}", label)
         except Exception:
             self.logger.exception("send failed{}", label)
@@ -1074,6 +1180,8 @@ class WebSocketChannel(BaseChannel):
         transcript_overrides: dict[str, Any] | None = None,
     ) -> bool:
         """Persist one canonical turn event and retain unsafe owners on failure."""
+        if not self._temporary_chats.should_persist_transcript(chat_id):
+            return True
         persisted = self._transcripts.prepare_and_append(
             chat_id,
             event,

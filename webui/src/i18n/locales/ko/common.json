@@ -49,6 +49,15 @@
       "noMatch": "이 코드와 일치하는 대기 중인 요청이 없습니다."
     }
   },
+  "temporaryChat": {
+    "title": "임시 채팅",
+    "retention": "기록이나 메모리에 저장되지 않습니다.",
+    "expiration": "새로고침, 페이지 닫기 또는 연결 끊김 시 임시 채팅이 종료됩니다.",
+    "externalEffects": "요청은 계속 모델 제공업체로 전송되며 도구 작업의 변경 사항은 남을 수 있습니다.",
+    "clear": "임시 채팅 지우기",
+    "sectionTitle": "임시 채팅",
+    "closeAction": "임시 채팅 닫기: {{title}}"
+  },
   "sidebar": {
     "navigation": "사이드바 탐색",
     "collapse": "사이드바 접기",
@@ -365,7 +374,15 @@
       "profile": "프로필",
       "extraHeaders": "추가 헤더",
       "extraBody": "추가 본문",
-      "extraQuery": "추가 쿼리"
+      "extraQuery": "추가 쿼리",
+      "capabilityFastMode": "고속 모드",
+      "capabilityFastModeHelp": "OpenAI 우선 서비스 등급을 사용해 더 빠르게 응답합니다. 크레딧도 더 빠르게 소모됩니다.",
+      "capabilityDeepSeekSearch": "DeepSeek 웹 검색",
+      "capabilityDeepSeekSearchHelp": "DeepSeek V4 Flash가 Responses API를 통해 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
+      "capabilityXSearch": "X 검색",
+      "capabilityXSearchHelp": "지원되는 Grok 모델이 xAI 호스팅 X Search를 사용하도록 허용합니다. 검색 활동은 채팅에 표시됩니다.",
+      "capabilityOpenAISearch": "OpenAI 웹 검색",
+      "capabilityOpenAISearchHelp": "Responses API 호환 모델이 웹을 검색하도록 허용합니다. 검색 활동은 채팅에 표시됩니다."
     },
     "image": {
       "selectProvider": "제공자 선택",

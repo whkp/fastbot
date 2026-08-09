@@ -113,6 +113,57 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("button", { name: "Fork" })).not.toBeInTheDocument();
   });
 
+  it("outlines temporary-chat user messages with a short dashed border", () => {
+    const message: UIMessage = {
+      id: "u-temporary",
+      role: "user",
+      content: "private question",
+      createdAt: Date.now(),
+    };
+
+    const { rerender } = render(<MessageBubble message={message} temporary />);
+    const bubble = screen.getByText("private question");
+
+    expect(bubble).toHaveAttribute("data-temporary-message", "true");
+    expect(bubble).toHaveClass("border-dashed", "border-muted-foreground/40", "bg-transparent");
+
+    rerender(<MessageBubble message={message} />);
+    expect(bubble).not.toHaveClass("border-dashed");
+    expect(bubble).toHaveClass("bg-secondary/70");
+  });
+
+  it("does not replay an entrance animation when persisted messages mount", () => {
+    const messages: UIMessage[] = [
+      {
+        id: "u-persisted",
+        role: "user",
+        content: "Earlier question",
+        createdAt: Date.now(),
+      },
+      {
+        id: "a-persisted",
+        role: "assistant",
+        content: "Earlier answer",
+        createdAt: Date.now(),
+      },
+      {
+        id: "t-persisted",
+        role: "tool",
+        kind: "trace",
+        content: "Earlier tool call",
+        createdAt: Date.now(),
+      },
+    ];
+
+    for (const message of messages) {
+      const { container, unmount } = render(<MessageBubble message={message} />);
+      for (const className of ["animate-in", "fade-in-0", "slide-in-from-bottom-1"]) {
+        expect(container.firstElementChild).not.toHaveClass(className);
+      }
+      unmount();
+    }
+  });
+
   it("renders failed delivery details on focus without persistent accepted chrome", async () => {
     const message: UIMessage = {
       id: "u-delivery",
@@ -884,6 +935,14 @@ describe("MessageBubble", () => {
 
     const imageButton = screen.getByRole("button", { name: /view image/i });
     expect(imageButton).toHaveClass("w-[min(100%,34rem)]", "rounded-[20px]");
+    expect(imageButton).toHaveClass(
+      "border",
+      "border-border/60",
+      "focus-visible:ring-2",
+    );
+    expect(imageButton).not.toHaveClass("hover:scale-[1.01]");
+    expect(imageButton).not.toHaveClass("hover:ring-2");
+    expect(imageButton).not.toHaveClass("hover:ring-primary/25");
     expect(imageButton).not.toHaveAttribute("title");
     expect(container.querySelector("img")).toHaveClass("h-auto", "w-full", "object-contain");
   });

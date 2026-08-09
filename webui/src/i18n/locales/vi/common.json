@@ -49,6 +49,15 @@
       "noMatch": "Không có yêu cầu đang chờ nào khớp với mã này."
     }
   },
+  "temporaryChat": {
+    "title": "Trò chuyện tạm thời",
+    "retention": "Không được lưu vào lịch sử hoặc bộ nhớ.",
+    "expiration": "Tải lại, đóng trang hoặc mất kết nối sẽ kết thúc các cuộc trò chuyện này.",
+    "externalEffects": "Yêu cầu vẫn được gửi đến nhà cung cấp mô hình và thao tác công cụ có thể để lại thay đổi.",
+    "clear": "Xóa trò chuyện tạm thời",
+    "sectionTitle": "Trò chuyện tạm thời",
+    "closeAction": "Đóng trò chuyện tạm thời: {{title}}"
+  },
   "sidebar": {
     "navigation": "Điều hướng thanh bên",
     "collapse": "Thu gọn thanh bên",
@@ -365,7 +374,15 @@
       "profile": "Hồ sơ",
       "extraHeaders": "Header bổ sung",
       "extraBody": "Body bổ sung",
-      "extraQuery": "Tham số truy vấn bổ sung"
+      "extraQuery": "Tham số truy vấn bổ sung",
+      "capabilityFastMode": "Chế độ nhanh",
+      "capabilityFastModeHelp": "Dùng tầng dịch vụ ưu tiên của OpenAI để phản hồi nhanh hơn. Tín dụng cũng sẽ được tiêu thụ nhanh hơn.",
+      "capabilityDeepSeekSearch": "Tìm kiếm web DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Cho phép DeepSeek V4 Flash tìm kiếm trên web qua Responses API. Hoạt động tìm kiếm được hiển thị trong cuộc trò chuyện.",
+      "capabilityXSearch": "Tìm kiếm X",
+      "capabilityXSearchHelp": "Cho phép các mô hình Grok được hỗ trợ dùng X Search do xAI lưu trữ. Hoạt động tìm kiếm được hiển thị trong cuộc trò chuyện.",
+      "capabilityOpenAISearch": "Tìm kiếm web OpenAI",
+      "capabilityOpenAISearchHelp": "Cho phép các mô hình tương thích với Responses API tìm kiếm trên web. Hoạt động tìm kiếm được hiển thị trong cuộc trò chuyện."
     },
     "image": {
       "selectProvider": "Chọn nhà cung cấp",

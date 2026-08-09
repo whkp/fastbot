@@ -15,11 +15,10 @@ OUTBOUND_META_AGENT_UI = "_agent_ui"
 # Internal-only inbound metadata used by in-process channels to ask the agent
 # loop to update runtime state without going through a user session.
 INBOUND_META_RUNTIME_CONTROL = "_runtime_control"
-# Trusted namespace grant for read-only persisted-session tools.
-INBOUND_META_SESSION_READ_SCOPE = "_session_read_scope"
 RUNTIME_CONTROL_ACK = "_ack"
 RUNTIME_CONTROL_MCP_RELOAD = "mcp_reload"
 RUNTIME_CONTROL_IMAGE_GENERATION_RELOAD = "image_generation_reload"
+RUNTIME_CONTROL_SESSION_DISCARD = "session_discard"
 
 
 @dataclass
@@ -34,6 +33,7 @@ class InboundMessage:
     media: list[str] = field(default_factory=list)  # Media URLs
     metadata: dict[str, Any] = field(default_factory=dict)  # Channel-specific data
     session_key_override: str | None = None  # Optional override for thread-scoped sessions
+    require_existing_session: bool = False
 
     @property
     def session_key(self) -> str:

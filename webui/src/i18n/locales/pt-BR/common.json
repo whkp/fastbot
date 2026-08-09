@@ -49,6 +49,15 @@
       "noMatch": "Nenhuma solicitação pendente corresponde a este código."
     }
   },
+  "temporaryChat": {
+    "title": "Chat temporário",
+    "retention": "Não é salvo no histórico nem na memória.",
+    "expiration": "Recarregar, fechar ou perder a conexão encerra estes chats.",
+    "externalEffects": "As solicitações ainda são enviadas ao provedor do modelo, e as ações das ferramentas podem deixar alterações.",
+    "clear": "Limpar chat temporário",
+    "sectionTitle": "Chats temporários",
+    "closeAction": "Fechar chat temporário: {{title}}"
+  },
   "sidebar": {
     "navigation": "Navegação da barra lateral",
     "collapse": "Recolher barra lateral",
@@ -514,7 +523,15 @@
       "profile": "Perfil",
       "extraHeaders": "Cabeçalhos adicionais",
       "extraBody": "Corpo adicional",
-      "extraQuery": "Parâmetros de consulta adicionais"
+      "extraQuery": "Parâmetros de consulta adicionais",
+      "capabilityFastMode": "Modo rápido",
+      "capabilityFastModeHelp": "Usa o nível de serviço prioritário da OpenAI para respostas mais rápidas. Isso consome créditos mais rapidamente.",
+      "capabilityDeepSeekSearch": "Pesquisa web do DeepSeek",
+      "capabilityDeepSeekSearchHelp": "Permite que o DeepSeek V4 Flash pesquise na web pela Responses API. A atividade de pesquisa aparece no chat.",
+      "capabilityXSearch": "Pesquisa no X",
+      "capabilityXSearchHelp": "Permite que modelos Grok compatíveis usem o X Search hospedado pela xAI. A atividade de pesquisa aparece no chat.",
+      "capabilityOpenAISearch": "Pesquisa web da OpenAI",
+      "capabilityOpenAISearchHelp": "Permite que modelos compatíveis com a Responses API pesquisem na web. A atividade de pesquisa aparece no chat."
     },
     "legal": {
       "thirdPartyBrands": "Nomes de produtos, logotipos e marcas são propriedades de seus respectivos donos. O uso é apenas para identificação e não implica endosso."
