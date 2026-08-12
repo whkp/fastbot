@@ -27,33 +27,16 @@ import type {
   NanobotFeatureInfo,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { useClient } from "@/providers/ClientProvider";
 
 import {
   WEIXIN_AUTH_EXPIRED_MESSAGE,
   WeixinConnectFlow,
 } from "./WeixinConnectFlow";
-
-export const WEIXIN_PRIMARY_FIELD_KEYS = [
-  "channels.weixin.sendProgress",
-  "channels.weixin.sendToolHints",
-  "channels.weixin.streaming",
-] as const;
-
-export const WEIXIN_ADVANCED_FIELD_KEYS = [
-  "channels.weixin.allowFrom",
-  "channels.weixin.token",
-  "channels.weixin.replyProgressMessages",
-  "channels.weixin.replyProgressMaxMessages",
-  "channels.weixin.contextMessageBudget",
-  "channels.weixin.blockStreaming",
-  "channels.weixin.blockStreamingMinChars",
-  "channels.weixin.blockStreamingMaxMessages",
-  "channels.weixin.baseUrl",
-  "channels.weixin.cdnBaseUrl",
-  "channels.weixin.routeTag",
-  "channels.weixin.stateDir",
-  "channels.weixin.pollTimeout",
-] as const;
+import {
+  WEIXIN_ADVANCED_FIELD_KEYS,
+  WEIXIN_PRIMARY_FIELD_KEYS,
+} from "./presentation";
 
 export function WeixinPanel({
   token,
@@ -64,6 +47,7 @@ export function WeixinPanel({
   onAction,
   onFeaturesUpdate,
 }: ChannelPluginPanelProps) {
+  const { client } = useClient();
   const { t, i18n } = useTranslation();
   const tx = (key: string, fallback: string) => t(key, { defaultValue: fallback });
   const channelTx = channelTranslator(t, "weixin");
@@ -150,7 +134,7 @@ export function WeixinPanel({
     setSaveState("idle");
     try {
       const payload = await configureChannel(
-        context.token,
+        client,
         "weixin",
         channelValuesForSave(editableFieldsRef.current, values),
         { enable: context.enabled },
@@ -168,7 +152,7 @@ export function WeixinPanel({
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [client]);
 
   useEffect(() => {
     if (

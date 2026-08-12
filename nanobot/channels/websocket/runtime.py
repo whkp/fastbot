@@ -373,6 +373,13 @@ class WebSocketChannel(BaseChannel):
         self._conn_default: dict[ServerConnection, str] = {}
         # Connections authenticated with a one-time token from /webui/bootstrap.
         self._webui_connections: set[ServerConnection] = set()
+        # Request/reply mutations aren't replayed across reconnects. Tasks may
+        # finish after a client-side deadline so an already-started mutation
+        # isn't ambiguously cancelled halfway through.
+        self._webui_request_tasks: dict[
+            tuple[ServerConnection, str],
+            asyncio.Task[None],
+        ] = {}
         self._stop_event: asyncio.Event | None = None
         self._server_task: asyncio.Task[None] | None = None
 
@@ -522,6 +529,10 @@ class WebSocketChannel(BaseChannel):
             await self._cleanup_connection(connection)
         except Exception as e:
             self.logger.warning("failed to send {} event: {}", event, e)
+
+    async def _broadcast_webui_event(self, event: str, **fields: Any) -> None:
+        for connection in tuple(self._webui_connections):
+            await self._send_event(connection, event, **fields)
 
     @classmethod
     def default_config(cls) -> dict[str, Any]:
@@ -758,6 +769,9 @@ class WebSocketChannel(BaseChannel):
     ) -> None:
         """Route one typed inbound envelope (``new_chat`` / ``attach`` / ``message``)."""
         t = envelope.get("type")
+        if t == "webui_request":
+            await self._start_webui_request(connection, envelope)
+            return
         if t == "new_chat":
             new_id = str(uuid.uuid4())
             scope = await self._workspace_scope_or_error(
@@ -838,7 +852,7 @@ class WebSocketChannel(BaseChannel):
                 )
                 return
             try:
-                await asyncio.to_thread(
+                saved_state = await asyncio.to_thread(
                     write_webui_sidebar_state,
                     cast(dict[str, Any], state),
                 )
@@ -848,6 +862,11 @@ class WebSocketChannel(BaseChannel):
                     "error",
                     detail="invalid_sidebar_state",
                 )
+                return
+            await self._broadcast_webui_event(
+                "sidebar_state_updated",
+                state=saved_state,
+            )
             return
         if t == "set_workspace_scope":
             cid = envelope.get("chat_id")
@@ -1105,6 +1124,157 @@ class WebSocketChannel(BaseChannel):
             return
         await self._send_event(connection, "error", detail=f"unknown type: {t!r}")
 
+    async def _start_webui_request(
+        self,
+        connection: ServerConnection,
+        envelope: dict[str, Any],
+    ) -> None:
+        request_id = envelope.get("request_id")
+        if not isinstance(request_id, str) or re.fullmatch(
+            r"[A-Za-z0-9._:-]{1,128}",
+            request_id,
+        ) is None:
+            await self._send_event(
+                connection,
+                "error",
+                detail="invalid webui request_id",
+            )
+            return
+        if connection not in self._webui_connections:
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=403,
+                message="access_denied",
+            )
+            return
+
+        action = envelope.get("action")
+        payload = envelope.get("payload")
+        if not isinstance(action, str) or re.fullmatch(
+            r"[a-z][a-z0-9_.]{0,127}",
+            action,
+        ) is None:
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=400,
+                message="invalid WebUI mutation action",
+            )
+            return
+        if not isinstance(payload, dict):
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=400,
+                message="WebUI mutation payload must be an object",
+            )
+            return
+
+        key = (connection, request_id)
+        if key in self._webui_request_tasks:
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=409,
+                message="duplicate WebUI request_id",
+            )
+            return
+        task = asyncio.create_task(
+            self._complete_webui_request(
+                connection,
+                request_id,
+                action,
+                cast(dict[str, Any], payload),
+            )
+        )
+        self._webui_request_tasks[key] = task
+
+    async def _complete_webui_request(
+        self,
+        connection: ServerConnection,
+        request_id: str,
+        action: str,
+        payload: dict[str, Any],
+    ) -> None:
+        try:
+            response = await self._http_router.dispatch_webui_mutation(
+                connection,
+                action,
+                payload,
+            )
+            status = response.status_code
+            body = bytes(response.body).decode("utf-8", errors="replace").strip()
+            if 200 <= status < 300:
+                try:
+                    result = json.loads(body)
+                except json.JSONDecodeError:
+                    await self._send_webui_response(
+                        connection,
+                        request_id,
+                        status=502,
+                        message="WebUI mutation returned an invalid response",
+                    )
+                    return
+                if action == "sidebar.update" and isinstance(result, dict):
+                    await self._broadcast_webui_event(
+                        "sidebar_state_updated",
+                        state=result,
+                    )
+                await self._send_webui_response(
+                    connection,
+                    request_id,
+                    result=result,
+                )
+                return
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=status,
+                message=body or response.reason_phrase,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self.logger.exception("WebUI mutation '{}' failed", action)
+            await self._send_webui_response(
+                connection,
+                request_id,
+                status=500,
+                message="WebUI mutation failed",
+            )
+        finally:
+            self._webui_request_tasks.pop((connection, request_id), None)
+
+    async def _send_webui_response(
+        self,
+        connection: ServerConnection,
+        request_id: str,
+        *,
+        result: Any = None,
+        status: int | None = None,
+        message: str | None = None,
+    ) -> None:
+        if status is None:
+            await self._send_event(
+                connection,
+                "webui_response",
+                request_id=request_id,
+                ok=True,
+                result=result,
+            )
+            return
+        await self._send_event(
+            connection,
+            "webui_response",
+            request_id=request_id,
+            ok=False,
+            error={
+                "status": status,
+                "message": message or "WebUI mutation failed",
+            },
+        )
+
     async def _workspace_scope_or_error(
         self,
         connection: ServerConnection,
@@ -1145,6 +1315,12 @@ class WebSocketChannel(BaseChannel):
             except Exception as e:
                 self.logger.warning("server task error during shutdown: {}", e)
             self._server_task = None
+        mutation_tasks = tuple(self._webui_request_tasks.values())
+        for task in mutation_tasks:
+            task.cancel()
+        if mutation_tasks:
+            await asyncio.gather(*mutation_tasks, return_exceptions=True)
+        self._webui_request_tasks.clear()
         self._subs.clear()
         self._conn_chats.clear()
         self._conn_default.clear()

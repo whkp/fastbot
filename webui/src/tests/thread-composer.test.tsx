@@ -350,6 +350,30 @@ function longPress(badge: HTMLElement, pointerId = 7) {
 }
 
 describe("ThreadComposer", () => {
+  it("locks an async send and keeps the draft when it is rejected", async () => {
+    let resolveSend!: (accepted: boolean) => void;
+    const onSend = vi.fn(() => new Promise<boolean>((resolve) => {
+      resolveSend = resolve;
+    }));
+    render(
+      <ThreadComposer
+        onSend={onSend}
+        placeholder="Type your message..."
+      />,
+    );
+
+    const input = screen.getByLabelText("Message input");
+    fireEvent.change(input, { target: { value: "keep this pending draft" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(input).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
+    await act(async () => resolveSend(false));
+
+    await waitFor(() => expect(input).toBeEnabled());
+    expect(input).toHaveValue("keep this pending draft");
+  });
+
   it("dismisses the touch keyboard after a successful send", async () => {
     vi.stubGlobal("matchMedia", vi.fn((query: string) => ({
       matches: query === "(hover: none) and (pointer: coarse)",
@@ -649,6 +673,49 @@ describe("ThreadComposer", () => {
     ));
     await waitFor(() => expect(screen.getByLabelText("Message input")).toHaveValue("hello voice"));
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("explains the HTTPS requirement for voice input on an insecure origin", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", false);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText(
+        "Chrome and other browsers block microphone access on remote HTTP pages for security. "
+          + "Open this WebUI over HTTPS to use voice input.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveClass("max-h-24");
+    expect(getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it("keeps the unsupported-browser error for secure origins without recording support", async () => {
+    const { getUserMedia } = mockVoiceRecorder();
+    vi.stubGlobal("isSecureContext", true);
+    vi.stubGlobal("MediaRecorder", undefined);
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        onTranscribeAudio={vi.fn(async () => "unused")}
+        placeholder="Type your message..."
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    expect(
+      await screen.findByText("Voice input is not supported in this browser."),
+    ).toBeInTheDocument();
+    expect(getUserMedia).not.toHaveBeenCalled();
   });
 
   it("converts voice recordings to wav for Xiaomi MiMo transcription", async () => {
@@ -1068,6 +1135,36 @@ describe("ThreadComposer", () => {
       access_mode: "full",
       restrict_to_workspace: false,
     }));
+  });
+
+  it.each([
+    ["Windows", "D:\\Users\\test\\.nanobot\\workspace", "D:\\path\\to\\project"],
+    ["macOS", "/Users/test/.nanobot/workspace", "/Users/name/project"],
+    ["Linux", "/home/test/.nanobot/workspace", "/home/name/project"],
+  ])("uses a %s path example for the project picker", async (_, projectPath, placeholder) => {
+    const user = userEvent.setup();
+    const defaultScope = {
+      project_path: projectPath,
+      project_name: "workspace",
+      access_mode: "restricted" as const,
+      restrict_to_workspace: true,
+    };
+
+    render(
+      <ThreadComposer
+        onSend={vi.fn()}
+        placeholder="Ask anything..."
+        variant="hero"
+        workspaceScope={defaultScope}
+        workspaceDefaultScope={defaultScope}
+        workspaceControls={{ can_change_project: true, can_use_full_access: true }}
+        onWorkspaceScopeChange={vi.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Choose project" }));
+
+    expect(await screen.findByLabelText("Paste path")).toHaveAttribute("placeholder", placeholder);
   });
 
   it("slides project controls closed without offering a compact replacement", () => {

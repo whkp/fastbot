@@ -73,6 +73,7 @@ type SessionUpdateHandler = (
   scope?: SessionUpdateScope,
   workspaceScope?: WorkspaceScopePayload,
 ) => void;
+type SidebarStateUpdateHandler = (state: SidebarStatePayload) => void;
 type RunStatusHandler = (chatId: string, startedAt: number | null) => void;
 
 /** Structured errors surfaced to the UI.
@@ -106,6 +107,16 @@ interface PendingRequest<T> {
   resolve: (value: T) => void;
   reject: (err: Error) => void;
   timer: ReturnType<typeof setTimeout>;
+}
+
+export class WebUIMutationError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+    this.name = "WebUIMutationError";
+  }
 }
 
 interface PendingChatRequest extends PendingRequest<string> {
@@ -168,6 +179,7 @@ export class NanobotClient {
   private statusHandlers = new Set<StatusHandler>();
   private runtimeModelHandlers = new Set<RuntimeModelHandler>();
   private sessionUpdateHandlers = new Set<SessionUpdateHandler>();
+  private sidebarStateUpdateHandlers = new Set<SidebarStateUpdateHandler>();
   private runStatusHandlers = new Set<RunStatusHandler>();
   private errorHandlers = new Set<ErrorHandler>();
   // chat_id -> handlers listening on it
@@ -203,6 +215,7 @@ export class NanobotClient {
   private pendingNewChat: PendingChatRequest | null = null;
   private pendingTranscriptions = new Map<string, PendingRequest<string>>();
   private pendingSystemCommands = new Map<string, PendingRequest<void>>();
+  private pendingWebUIRequests = new Map<string, PendingRequest<unknown>>();
   // Frames queued while the socket is not yet OPEN
   private sendQueue: Outbound[] = [];
   private reconnectAttempts = 0;
@@ -261,6 +274,13 @@ export class NanobotClient {
     this.sessionUpdateHandlers.add(handler);
     return () => {
       this.sessionUpdateHandlers.delete(handler);
+    };
+  }
+
+  onSidebarStateUpdate(handler: SidebarStateUpdateHandler): Unsubscribe {
+    this.sidebarStateUpdateHandlers.add(handler);
+    return () => {
+      this.sidebarStateUpdateHandlers.delete(handler);
     };
   }
 
@@ -807,6 +827,60 @@ export class NanobotClient {
     });
   }
 
+  /**
+   * Send one non-replayable WebUI mutation over the authenticated socket.
+   * A client-side timeout only abandons the reply; the server may finish work
+   * that already started, so timed-out requests are never retried automatically.
+   */
+  requestMutation<T>(
+    action: string,
+    payload: Record<string, unknown> = {},
+    timeoutMs: number = 20_000,
+  ): Promise<T> {
+    const socket = this.socket;
+    if (!socket || socket.readyState !== WS_OPEN) {
+      return Promise.reject(
+        new WebUIMutationError(503, "WebUI connection is not open"),
+      );
+    }
+    const requestId = crypto.randomUUID();
+    const frame: Outbound = {
+      type: "webui_request",
+      request_id: requestId,
+      action,
+      payload,
+    };
+    if (!this.frameFitsTransport(frame)) {
+      return Promise.reject(
+        new WebUIMutationError(413, "WebUI mutation payload is too large"),
+      );
+    }
+
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingWebUIRequests.delete(requestId);
+        reject(
+          new WebUIMutationError(
+            504,
+            `WebUI request timed out after ${timeoutMs}ms`,
+          ),
+        );
+      }, timeoutMs);
+      this.pendingWebUIRequests.set(requestId, {
+        resolve: (value) => resolve(value as T),
+        reject,
+        timer,
+      });
+      try {
+        socket.send(JSON.stringify(frame));
+      } catch {
+        clearTimeout(timer);
+        this.pendingWebUIRequests.delete(requestId);
+        reject(new WebUIMutationError(503, "Could not send WebUI request"));
+      }
+    });
+  }
+
   /** Ask the server to create a non-destructive fork before a user-message index. */
   forkChat(
     sourceChatId: string,
@@ -914,8 +988,8 @@ export class NanobotClient {
     });
   }
 
-  setSidebarState(state: SidebarStatePayload): void {
-    this.queueSend({ type: "set_sidebar_state", state });
+  setSidebarState(state: SidebarStatePayload): Promise<SidebarStatePayload> {
+    return this.requestMutation<SidebarStatePayload>("sidebar.update", { state });
   }
 
   // -- internals ---------------------------------------------------------
@@ -963,6 +1037,23 @@ export class NanobotClient {
 
     if (wsInboundDebugEnabled()) {
       console.log("[nanobot ws inbound]", summarizeInboundWsPayload(parsed));
+    }
+
+    if (parsed.event === "webui_response") {
+      const pending = this.pendingWebUIRequests.get(parsed.request_id);
+      if (!pending) return;
+      clearTimeout(pending.timer);
+      this.pendingWebUIRequests.delete(parsed.request_id);
+      if (parsed.ok) {
+        pending.resolve(parsed.result);
+      } else {
+        const status = Number.isFinite(parsed.error?.status)
+          ? parsed.error.status
+          : 500;
+        const message = parsed.error?.message || "WebUI mutation failed";
+        pending.reject(new WebUIMutationError(status, message));
+      }
+      return;
     }
 
     if (parsed.event === "error" && !parsed.turn_id) {
@@ -1067,6 +1158,11 @@ export class NanobotClient {
       return;
     }
 
+    if (parsed.event === "sidebar_state_updated") {
+      this.emitSidebarStateUpdate(parsed.state);
+      return;
+    }
+
     if (parsed.event === "error" && parsed.detail === "workspace_scope_rejected") {
       this.emitError({
         kind: "workspace_scope_rejected",
@@ -1116,6 +1212,12 @@ export class NanobotClient {
     }
   }
 
+  private emitSidebarStateUpdate(state: SidebarStatePayload): void {
+    for (const handler of this.sidebarStateUpdateHandlers) {
+      handler(state);
+    }
+  }
+
   private emitRunStatus(chatId: string, startedAt: number | null): void {
     for (const handler of this.runStatusHandlers) {
       handler(chatId, startedAt);
@@ -1151,6 +1253,13 @@ export class NanobotClient {
       this.pendingNewChat = null;
     }
     this.rejectAllTranscriptions("socket closed");
+    for (const pending of this.pendingWebUIRequests.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(
+        new WebUIMutationError(503, "Socket closed before WebUI response"),
+      );
+    }
+    this.pendingWebUIRequests.clear();
     for (const pending of this.pendingSystemCommands.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("socket closed"));
