@@ -81,34 +81,13 @@ class DreamConfig(Base):
 
 
 class PlanConfig(Base):
-    """Plan-as-Tool configuration (design.md)."""
+    """Limits for the lightweight model-managed plan tool."""
 
-    enabled: bool = False  # Phase 2 端到端验证后才逐步开启
-    max_steps: int = Field(default=20, ge=1, le=20)  # Hard schema cap stays 20
-    max_step_chars: int = Field(default=240, ge=1)
-    max_explanation_chars: int = Field(default=480, ge=1)
-    max_context_chars: int = Field(default=6_000, ge=1)
-    nudge_after_tool_iterations: int = Field(default=6, ge=1)
-    nudge_min_interval_requests: int = Field(default=3, ge=1)
-
-
-class DelegationConfig(Base):
-    """Sub-agent delegation configuration (design.md §6)."""
-
-    max_concurrent_subagents: int = Field(default=1, ge=1)
-    max_provider_requests_per_task_scope: int = Field(default=90, ge=1)
-    roles: list[str] = Field(
-        default_factory=lambda: ["default", "analyst", "implementer", "reviewer", "researcher"]
-    )
-
-
-class StallConfig(Base):
-    """Stall-detection configuration (design.md §8)."""
-
-    mode: str = "off"  # off | shadow | active
-    window_requests: int = Field(default=8, ge=1)
-    repeated_signature_limit: int = Field(default=4, ge=1)
-    cooldown_requests: int = Field(default=3, ge=1)
+    enabled: bool = False
+    max_steps: int = Field(default=12, ge=1, le=12)
+    max_step_chars: int = Field(default=160, ge=1, le=160)
+    max_explanation_chars: int = Field(default=300, ge=0, le=300)
+    max_context_chars: int = Field(default=3_000, ge=256, le=3_000)
 
 
 class InlineFallbackConfig(Base):

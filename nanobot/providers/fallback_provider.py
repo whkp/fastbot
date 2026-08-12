@@ -175,6 +175,7 @@ class FallbackProvider(LLMProvider):
         return ProviderCallContext(
             conversation_state=provider_context.conversation_state,
             context_window_tokens=context_window_tokens,
+            ephemeral_context=provider_context.ephemeral_context,
         )
 
     def _primary_available(self) -> bool:
@@ -392,6 +393,7 @@ class FallbackProvider(LLMProvider):
                 fallback_kwargs["provider_context"] = ProviderCallContext(
                     conversation_state=state,
                     context_window_tokens=context_window_tokens,
+                    ephemeral_context=provider_context.ephemeral_context,
                 )
             if fallback.reasoning_effort is None:
                 fallback_kwargs.pop("reasoning_effort", None)

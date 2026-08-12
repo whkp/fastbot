@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.file_state import FileStates
     from nanobot.bus.queue import MessageBus
     from nanobot.bus.runtime_events import RuntimeEventBus
-    from nanobot.config.schema import ProviderConfig, ToolsConfig
+    from nanobot.config.schema import PlanConfig, ProviderConfig, ToolsConfig
     from nanobot.cron.service import CronService
     from nanobot.providers.factory import ProviderSnapshot
     from nanobot.security.workspace_access import WorkspaceSandboxStatus
@@ -90,3 +90,4 @@ class ToolContext:
     timezone: str = "UTC"
     workspace_sandbox: WorkspaceSandboxStatus | None = None
     runtime_events: RuntimeEventBus | None = None
+    plan_config: PlanConfig | None = None

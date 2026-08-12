@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -40,6 +41,24 @@ def test_codex_default_model_matches_curated_flagship() -> None:
     assert spec is not None
     assert spec.builtin_models
     assert OpenAICodexProvider().get_default_model() == spec.builtin_models[0].id
+
+
+@pytest.mark.asyncio
+async def test_codex_context_hook_merges_ephemeral_overlay_without_mutating_messages() -> None:
+    provider = OpenAICodexProvider()
+    provider.chat = AsyncMock(return_value=provider_base.LLMResponse(content="ok"))
+    messages = [{"role": "system", "content": "base"}, {"role": "user", "content": "hi"}]
+
+    await provider.chat_with_context(
+        messages=messages,
+        provider_context=provider_base.ProviderCallContext(
+            ephemeral_context="<task_state>plan</task_state>",
+        ),
+    )
+
+    sent = provider.chat.await_args.kwargs["messages"]
+    assert "<task_state>plan</task_state>" in sent[0]["content"]
+    assert messages[0]["content"] == "base"
 
 
 class _WarningCaptureLogger:

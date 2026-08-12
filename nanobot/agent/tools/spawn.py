@@ -21,6 +21,9 @@ if TYPE_CHECKING:
     from nanobot.agent.tools.context import ToolContext
 
 
+_SUBAGENT_ROLES = frozenset(("default", "researcher", "analyst", "reviewer", "implementer"))
+
+
 @tool_parameters(
     tool_parameters_schema(
         task=StringSchema("The task for the subagent to complete"),
@@ -33,6 +36,10 @@ if TYPE_CHECKING:
             ),
             minimum=0.0,
             maximum=2.0,
+        ),
+        role=StringSchema(
+            "Role matched to the delegated work: default, researcher, analyst, reviewer, or implementer.",
+            enum=["default", "researcher", "analyst", "reviewer", "implementer"],
         ),
         wait=BooleanSchema(
             description=(
@@ -67,6 +74,8 @@ class SpawnTool(Tool):
         return (
             "Spawn a subagent to handle a task in the background. "
             "Use this for complex or time-consuming tasks that can run independently. "
+            "Choose role='researcher' for source gathering, 'analyst' for evidence-based "
+            "analysis, 'reviewer' for read-only review, or 'implementer' for code changes. "
             "Set wait=true for a consultation whose result must inform the current turn. "
             "The subagent will complete the task and report back when done. "
             "For deliverables or existing projects, inspect the workspace first "
@@ -78,6 +87,7 @@ class SpawnTool(Tool):
         task: str,
         label: str | None = None,
         temperature: float | None = None,
+        role: str = "default",
         wait: bool = False,
         **kwargs: Any,
     ) -> str:
@@ -93,6 +103,10 @@ class SpawnTool(Tool):
         request_ctx = current_request_context()
         if request_ctx is None or request_ctx.runtime is None:
             return ToolResult.error("Error: spawn requires an active model runtime")
+        if not isinstance(role, str) or role.strip().lower() not in _SUBAGENT_ROLES:
+            return ToolResult.error(
+                "Error: role must be one of default, researcher, analyst, reviewer, or implementer."
+            )
         origin_channel = request_ctx.channel
         origin_chat_id = request_ctx.chat_id
         session_key = request_ctx.session_key or f"{origin_channel}:{origin_chat_id}"
@@ -106,5 +120,6 @@ class SpawnTool(Tool):
             session_key=session_key,
             origin_message_id=request_ctx.message_id,
             temperature=temperature,
+            role=role.strip().lower(),
             workspace_scope=current_workspace_scope(),
         )

@@ -109,6 +109,37 @@ def test_subagent_prompt_explains_grouped_skill_paths(tmp_path):
     assert "project-custom" not in prompt
 
 
+def test_read_only_subagent_roles_remove_write_and_exec_tools(tmp_path):
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+
+    for role in ("researcher", "analyst", "reviewer"):
+        tools = manager._build_tools(role=role)
+        assert not {"apply_patch", "edit_file", "write_file", "exec", "spawn", "update_plan"} & set(tools.tool_names)
+        assert tools.has("read_file")
+
+    implementer_tools = manager._build_tools(role="implementer")
+    assert implementer_tools.has("apply_patch")
+    assert implementer_tools.has("write_file")
+
+
+def test_subagent_role_prompt_is_explicit_and_rejects_unknown_role(tmp_path):
+    manager = SubagentManager(
+        workspace=tmp_path,
+        bus=MessageBus(),
+        max_tool_result_chars=16_000,
+    )
+
+    prompt = manager._build_subagent_prompt(role="reviewer")
+    assert "## Role: reviewer" in prompt
+    assert "Do not modify files." in prompt
+    with pytest.raises(ValueError, match="role must be one of"):
+        manager._build_tools(role="writer")
+
+
 @pytest.mark.asyncio
 async def test_subagent_keeps_project_runtime_scope_with_agent_owned_tools(tmp_path):
     agent_workspace = tmp_path / "agent"

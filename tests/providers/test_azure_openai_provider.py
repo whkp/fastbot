@@ -266,6 +266,22 @@ def test_build_body_enables_server_compaction():
     }]
 
 
+@pytest.mark.asyncio
+async def test_context_hook_merges_ephemeral_overlay_without_mutating_messages():
+    provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com")
+    provider.chat = AsyncMock(return_value=LLMResponse(content="ok"))
+    messages = [{"role": "system", "content": "base"}, {"role": "user", "content": "hi"}]
+
+    await provider.chat_with_context(
+        messages=messages,
+        provider_context=ProviderCallContext(ephemeral_context="<task_state>plan</task_state>"),
+    )
+
+    sent = provider.chat.await_args.kwargs["messages"]
+    assert "<task_state>plan</task_state>" in sent[0]["content"]
+    assert messages[0]["content"] == "base"
+
+
 def test_build_body_max_tokens_minimum():
     """max_output_tokens should never be less than 1."""
     provider = AzureOpenAIProvider(api_key="k", api_base="https://r.com", default_model="gpt-4o")

@@ -317,6 +317,7 @@ class AzureOpenAIProvider(LLMProvider):
         provider_context: ProviderCallContext,
         **kwargs: Any,
     ) -> LLMResponse:
+        kwargs = self._apply_ephemeral_context(kwargs, provider_context)
         return await self.chat(
             **kwargs,
             provider_context=provider_context,
@@ -328,6 +329,7 @@ class AzureOpenAIProvider(LLMProvider):
         provider_context: ProviderCallContext,
         **kwargs: Any,
     ) -> LLMResponse:
+        kwargs = self._apply_ephemeral_context(kwargs, provider_context)
         return await self.chat_stream(
             **kwargs,
             provider_context=provider_context,

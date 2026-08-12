@@ -18,7 +18,6 @@ from nanobot.agent.context_governance import (
     ContextGovernor,
 )
 from nanobot.agent.hook import AgentHook, AgentHookContext, AgentRunHookContext
-from nanobot.agent.model_context import ModelContextOverlay
 from nanobot.agent.tools.registry import ToolRegistry, is_tool_error_result
 from nanobot.providers.base import (
     LLMProvider,
@@ -116,10 +115,9 @@ class AgentRunSpec:
     goal_continue_message: GoalContinueMessage | None = None
     finalize_on_max_iterations: bool = True
     provider_state: ProviderConversationState | None = None
-    # Model-only context overlay provider. Called before every provider request
-    # to build the ephemeral TASK_STATE/nudge/stall block; the rendered text is
-    # sent with that single request and never persisted.
-    overlay_provider: Callable[[], ModelContextOverlay | None] | None = None
+    # Called before every provider request to rebuild model-only TASK_STATE.
+    # The returned text is sent with that request and never persisted.
+    overlay_provider: Callable[[], str | None] | None = None
 
 
 @dataclass(slots=True)
@@ -879,14 +877,11 @@ class AgentRunner:
 
     @staticmethod
     def _overlay_text(spec: AgentRunSpec) -> str | None:
-        """Render the current model-only overlay text, or None."""
+        """Return the current model-only request context, or None."""
         provider = spec.overlay_provider
         if provider is None:
             return None
-        overlay = provider()
-        if overlay is None or overlay.is_empty:
-            return None
-        return overlay.render()
+        return provider() or None
 
     @staticmethod
     def _with_ephemeral_context(

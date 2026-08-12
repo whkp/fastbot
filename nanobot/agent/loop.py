@@ -35,6 +35,7 @@ from nanobot.agent.tools.context import RequestContext, bind_request_context, re
 from nanobot.agent.tools.exec_session import ExecSessionManager
 from nanobot.agent.tools.file_state import FileStateStore, bind_file_states, reset_file_states
 from nanobot.agent.tools.message import MessageTool
+from nanobot.agent.tools.plan import plan_overlay
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.agent.tools.self import MyTool
 from nanobot.agent.turn_delivery import (
@@ -48,7 +49,7 @@ from nanobot.bus.outbound_events import StreamedResponseEvent
 from nanobot.bus.queue import MessageBus
 from nanobot.bus.runtime_events import RuntimeEventBus
 from nanobot.command import CommandContext, CommandRouter, register_builtin_commands
-from nanobot.config.schema import AgentDefaults, ModelPresetConfig
+from nanobot.config.schema import AgentDefaults, ModelPresetConfig, PlanConfig
 from nanobot.providers.base import LLMProvider, ProviderConversationState
 from nanobot.providers.factory import ProviderSnapshot
 from nanobot.runtime_context import (
@@ -290,6 +291,7 @@ class AgentLoop:
         restart_mode: str = "auto",
         local_trigger_store: LocalTriggerStore | None = None,
         idle_compact_check_interval_seconds: int = 0,
+        plan_config: PlanConfig | None = None,
     ):
         from nanobot.config.schema import ToolsConfig
 
@@ -349,6 +351,7 @@ class AgentLoop:
             tool_hint_max_length if tool_hint_max_length is not None
             else defaults.tool_hint_max_length
         )
+        self.plan_config = plan_config or defaults.plan
         self.tools_config = _tc
         self.web_config = _tc.web
         self.exec_config = _tc.exec
@@ -501,6 +504,7 @@ class AgentLoop:
             disabled_skills=defaults.disabled_skills,
             session_ttl_minutes=defaults.session_ttl_minutes,
             idle_compact_check_interval_seconds=defaults.idle_compact_check_interval_seconds,
+            plan_config=defaults.plan,
             consolidation_ratio=defaults.consolidation_ratio,
             tools_config=config.tools,
             model_presets=preset_helpers.configured_model_presets(config),
@@ -619,6 +623,7 @@ class AgentLoop:
             timezone=self.context.timezone or "UTC",
             workspace_sandbox=self.workspace_scopes.sandbox_status,
             runtime_events=self.runtime_events,
+            plan_config=self.plan_config,
         )
         loader = ToolLoader()
         registered = loader.load(ctx, self.tools)
@@ -1100,6 +1105,14 @@ class AgentLoop:
                     message_metadata=metadata,
                 ),
                 provider_state=provider_state,
+                overlay_provider=(
+                    lambda: plan_overlay(
+                        session.metadata,
+                        max_context_chars=self.plan_config.max_context_chars,
+                    )
+                    if self.plan_config.enabled and session is not None
+                    else None
+                ),
             ))
         finally:
             turn_scope_stack.close()

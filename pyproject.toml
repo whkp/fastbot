@@ -106,6 +106,7 @@ dev = [
 ]
 
 [project.scripts]
+fastbot = "nanobot.cli.commands:app"
 nanobot = "nanobot.cli.commands:app"
 
 # Third-party tool plugins register here.  Built-in tools are discovered

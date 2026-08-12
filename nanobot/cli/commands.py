@@ -80,10 +80,19 @@ from nanobot.utils.helpers import (  # noqa: E402
 SafeFileHistory = cli_terminal.SafeFileHistory
 
 
+def _cli_name() -> str:
+    """Use the branded command name while retaining the upstream alias."""
+    executable = Path(sys.argv[0]).stem.casefold()
+    return "fastbot" if executable == "fastbot" else "nanobot"
+
+
+_COMMAND_NAME = _cli_name()
+
+
 app = typer.Typer(
-    name="nanobot",
+    name=_COMMAND_NAME,
     context_settings={"help_option_names": ["-h", "--help"]},
-    help=f"{__logo__} nanobot - Personal AI Assistant",
+    help=f"{__logo__} {_COMMAND_NAME} - Personal AI Assistant",
     no_args_is_help=True,
 )
 
@@ -91,7 +100,7 @@ console = Console()
 
 def version_callback(value: bool):
     if value:
-        console.print(f"{__logo__} nanobot v{__version__}")
+        console.print(f"{__logo__} {_COMMAND_NAME} v{__version__}")
         raise typer.Exit()
 
 
@@ -101,7 +110,7 @@ def main(
         None, "--version", "-v", callback=version_callback, is_eager=True
     ),
 ):
-    """nanobot - Personal AI Assistant."""
+    """Run the Fastbot personal AI assistant."""
     pass
 
 
@@ -198,11 +207,11 @@ def onboard(
 
     sync_workspace_templates(workspace_path)
 
-    webui_cmd = "nanobot webui"
+    webui_cmd = f"{_COMMAND_NAME} webui"
     if explicit_config:
         webui_cmd += f' -c "{config_path}"'
 
-    typer.echo(f"\n✓ nanobot is ready. Run: {webui_cmd}")
+    typer.echo(f"\n✓ {_COMMAND_NAME} is ready. Run: {webui_cmd}")
 
 
 def _onboard_plugins(config_path: Path) -> None:
@@ -593,7 +602,7 @@ def status(
     config_path, loaded = _load_inspection_config(config=config, workspace=workspace)
     workspace_path = loaded.workspace_path
 
-    console.print(f"{__logo__} nanobot Status\n")
+    console.print(f"{__logo__} {_COMMAND_NAME} Status\n")
 
     console.print(f"Config: {config_path} {'[green]✓[/green]' if config_path.exists() else '[red]✗[/red]'}")
     console.print(
@@ -647,7 +656,7 @@ def status(
 
         if provider_ready:
             console.print()
-            console.print('Next: [cyan]nanobot agent -m "Hello!"[/cyan]')
+            console.print(f'Next: [cyan]{_COMMAND_NAME} agent -m "Hello!"[/cyan]')
             console.print(
                 "[dim]Status does not call the model or verify network access and credentials.[/dim]"
             )

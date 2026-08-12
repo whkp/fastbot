@@ -846,8 +846,8 @@ class LLMProvider(ABC):
         kwargs = self._apply_ephemeral_context(kwargs, provider_context)
         return await self.chat_stream(**kwargs)
 
+    @staticmethod
     def _apply_ephemeral_context(
-        self,
         kwargs: dict[str, Any],
         provider_context: ProviderCallContext | None,
     ) -> dict[str, Any]:
@@ -863,9 +863,17 @@ class LLMProvider(ABC):
         messages = kwargs.get("messages")
         if not isinstance(messages, list):
             return kwargs
-        from nanobot.agent.model_context import merge_overlay_into_messages
-
-        merged = merge_overlay_into_messages(messages, overlay)
+        first = messages[0] if messages else None
+        if isinstance(first, dict) and first.get("role") == "system" and isinstance(
+            first.get("content"), str
+        ):
+            merged = [
+                {**first, "content": f"{first['content']}\n\n{overlay}".strip()},
+                *messages[1:],
+            ]
+        else:
+            # Preserve the original order of any tool-call/tool-result pairs.
+            merged = [{"role": "system", "content": overlay}, *messages]
         return {**kwargs, "messages": merged}
 
     async def _safe_chat_stream(self, **kwargs: Any) -> LLMResponse:
@@ -1155,6 +1163,7 @@ class LLMProvider(ABC):
                             context_window_tokens=(
                                 provider_context.context_window_tokens
                             ),
+                            ephemeral_context=provider_context.ephemeral_context,
                         )
                 if stripped is not None or stripped_context is not None:
                     logger.warning(

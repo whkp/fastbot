@@ -375,6 +375,26 @@ class TestFallbackOnPrimaryError:
         ]
 
     @pytest.mark.asyncio
+    async def test_failover_preserves_ephemeral_context(self) -> None:
+        primary = _FakeProvider("primary", _error_response())
+        fallback = _FakeProvider("fallback", _make_response("fallback ok"))
+        fb = FallbackProvider(
+            primary=primary,
+            fallback_presets=[_fallback("fallback-a", context_window_tokens=120_000)],
+            provider_factory=MagicMock(return_value=fallback),
+        )
+
+        result = await fb.chat_with_context(
+            messages=[{"role": "system", "content": "base"}, {"role": "user", "content": "hi"}],
+            model="primary-model",
+            provider_context=ProviderCallContext(ephemeral_context="<task_state>plan</task_state>"),
+        )
+
+        assert result.content == "fallback ok"
+        assert primary.context_calls[0].ephemeral_context == "<task_state>plan</task_state>"
+        assert fallback.context_calls[0].ephemeral_context == "<task_state>plan</task_state>"
+
+    @pytest.mark.asyncio
     async def test_native_fallback_gets_context_when_primary_does_not_use_it(self) -> None:
         primary = _FakeProvider("primary", _error_response())
         fallback = _FakeProvider("fallback", _make_response("fallback ok"))

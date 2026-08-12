@@ -37,6 +37,36 @@ from nanobot.security.workspace_access import (
 from nanobot.utils.llm_runtime import LLMRuntime
 from nanobot.utils.prompt_templates import render_template
 
+_READ_ONLY_WORKSPACE_TOOLS = frozenset(("find_files", "grep", "list_dir", "read_file"))
+_READ_ONLY_ROLE_TOOLS: dict[str, frozenset[str]] = {
+    "researcher": _READ_ONLY_WORKSPACE_TOOLS | frozenset(("web_fetch", "web_search")),
+    "analyst": _READ_ONLY_WORKSPACE_TOOLS,
+    "reviewer": _READ_ONLY_WORKSPACE_TOOLS,
+}
+_ROLE_INSTRUCTIONS = {
+    "researcher": (
+        "Gather relevant evidence from the workspace and approved web tools. Distinguish facts "
+        "from inferences, cite concrete paths or URLs in the final result, and do not modify files."
+    ),
+    "analyst": (
+        "Analyze the supplied question using available read-only evidence. State assumptions, "
+        "show the important reasoning, and return concise findings with file references. Do not modify files."
+    ),
+    "reviewer": (
+        "Review the requested implementation or design critically. Focus on concrete defects, "
+        "risks, regressions, and missing tests, ordered by severity. Do not modify files."
+    ),
+    "implementer": (
+        "Implement the assigned change carefully. Inspect before editing, keep the change scoped, "
+        "and run the smallest relevant verification before reporting the result."
+    ),
+    "default": (
+        "Handle the assigned task directly using the available tools. Keep the work focused and "
+        "report concrete results back to the main agent."
+    ),
+}
+_SUBAGENT_ROLES = frozenset(_ROLE_INSTRUCTIONS)
+
 
 class _SubagentOrigin(TypedDict):
     channel: str
@@ -205,8 +235,10 @@ class SubagentManager:
         self,
         workspace: Path | None = None,
         tools_config: ToolsConfig | None = None,
+        role: str = "default",
     ) -> ToolRegistry:
         """Build an isolated subagent tool registry via ToolLoader."""
+        role = self._require_role(role)
         root = self.workspace if workspace is None else workspace
         registry = ToolRegistry()
         cfg = tools_config if tools_config is not None else self._subagent_tools_config()
@@ -221,7 +253,25 @@ class SubagentManager:
             ),
         )
         ToolLoader().load(ctx, registry, scope="subagent")
+        allowed = _READ_ONLY_ROLE_TOOLS.get(role)
+        if allowed is not None:
+            for name in tuple(registry.tool_names):
+                if name not in allowed:
+                    registry.unregister(name)
         return registry
+
+    @staticmethod
+    def is_valid_role(role: str) -> bool:
+        return isinstance(role, str) and role.strip().lower() in _SUBAGENT_ROLES
+
+    @staticmethod
+    def _require_role(role: str) -> str:
+        normalized = role.strip().lower() if isinstance(role, str) else ""
+        if normalized not in _SUBAGENT_ROLES:
+            raise ValueError(
+                "role must be one of default, researcher, analyst, reviewer, or implementer"
+            )
+        return normalized
 
     async def spawn(
         self,
@@ -233,6 +283,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        role: str = "default",
         *,
         runtime: LLMRuntime | None = None,
     ) -> str:
@@ -241,6 +292,7 @@ class SubagentManager:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
+        role = self._require_role(role)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
@@ -267,6 +319,7 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                role=role,
             )
         )
         self._running_tasks[task_id] = bg_task
@@ -296,6 +349,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         temperature: float | None = None,
         workspace_scope: WorkspaceScope | None = None,
+        role: str = "default",
         *,
         runtime: LLMRuntime | None = None,
     ) -> str:
@@ -304,6 +358,7 @@ class SubagentManager:
             runtime = self._compat_spawn_runtime()
         if temperature is not None:
             runtime = runtime.with_generation_overrides(temperature=temperature)
+        role = self._require_role(role)
         task_id = str(uuid.uuid4())[:8]
         display_label = label or task[:30] + ("..." if len(task) > 30 else "")
         origin: _SubagentOrigin = {
@@ -329,6 +384,7 @@ class SubagentManager:
                 runtime,
                 origin_message_id,
                 workspace_scope,
+                role=role,
                 announce=False,
             )
         )
@@ -359,6 +415,7 @@ class SubagentManager:
         origin_message_id: str | None = None,
         workspace_scope: WorkspaceScope | None = None,
         *,
+        role: str = "default",
         announce: bool = True,
     ) -> str:
         """Execute the subagent task and announce the result."""
@@ -375,8 +432,8 @@ class SubagentManager:
                 cfg = self._subagent_tools_config()
                 cfg.restrict_to_workspace = workspace_scope.restrict_to_workspace
             # Construct from the agent workspace; the bound scope below supplies the project cwd.
-            tools = self._build_tools(tools_config=cfg)
-            system_prompt = self._build_subagent_prompt(workspace=root)
+            tools = self._build_tools(tools_config=cfg, role=role)
+            system_prompt = self._build_subagent_prompt(workspace=root, role=role)
             messages: list[dict[str, Any]] = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": task},
@@ -526,7 +583,11 @@ class SubagentManager:
             lines.append(f"- {result.error}")
         return "\n".join(lines) or (result.error or "Error: subagent execution failed.")
 
-    def _build_subagent_prompt(self, workspace: Path | None = None) -> str:
+    def _build_subagent_prompt(
+        self,
+        workspace: Path | None = None,
+        role: str = "default",
+    ) -> str:
         """Build a focused system prompt for the subagent."""
         from nanobot.agent.skills import SkillsLoader
 
@@ -536,12 +597,15 @@ class SubagentManager:
             self.workspace,
             disabled_skills=self.disabled_skills,
         ).build_skills_summary()
+        role = self._require_role(role)
         return render_template(
             "agent/subagent_system.md",
             workspace=str(project_workspace),
             agent_workspace=str(agent_workspace),
             history_log=str(agent_workspace / "memory" / "history.jsonl"),
             skills_summary=skills_summary or "",
+            role=role,
+            role_instruction=_ROLE_INSTRUCTIONS[role],
         )
 
     async def cancel_by_session(self, session_key: str) -> int:
